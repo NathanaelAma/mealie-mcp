@@ -2,7 +2,8 @@
 
 The MCP endpoint itself is gated by a static bearer token (see ``server.py``),
 but the *Mealie* credential is supplied per request: each MCP client sends its
-own Mealie API token in the ``X-Mealie-Token`` header. That token is read from
+own Mealie API token in a request header (``X-Mealie-Token`` by default,
+configurable via ``MEALIE_TOKEN_HEADER``). That token is read from
 the active HTTP request and forwarded to Mealie as a bearer token, so a single
 server instance can serve many Mealie users.
 
@@ -52,7 +53,7 @@ def _request_headers() -> Headers:
     ``get_http_headers()`` helper. ``get_http_headers()`` strips a fixed set of
     "problematic" headers (``authorization`` among them) before returning, so
     routing credential lookups through it would silently drop the per-request
-    Mealie token carried in ``X-Mealie-Token`` as well as the endpoint's own
+    Mealie token (should its header be configured that way) as well as the endpoint's own
     ``Authorization`` gate. Reading the request object directly keeps every
     header intact.
     """
@@ -65,21 +66,33 @@ def _request_headers() -> Headers:
     return request.headers
 
 
+def _token_header() -> str:
+    """Name of the header carrying the per-request Mealie token."""
+    return _settings.mealie_token_header if _settings else MEALIE_TOKEN_HEADER
+
+
+def _url_header() -> str:
+    """Name of the header carrying the optional Mealie base-URL override."""
+    return _settings.mealie_url_header if _settings else MEALIE_URL_HEADER
+
+
 def _resolve_request() -> tuple[str, str]:
     """Return ``(base_url, mealie_token)`` for the current request.
 
     Raises ToolError with an actionable message if either is missing.
     """
     headers = _request_headers()
+    token_header = _token_header()
+    url_header = _url_header()
 
-    token = (headers.get(MEALIE_TOKEN_HEADER) or "").strip()
+    token = (headers.get(token_header) or "").strip()
     if not token:
         raise ToolError(
             f"Missing Mealie credential: send your Mealie API token in the "
-            f"'{MEALIE_TOKEN_HEADER}' header."
+            f"'{token_header}' header."
         )
 
-    base_url = (headers.get(MEALIE_URL_HEADER) or "").strip()
+    base_url = (headers.get(url_header) or "").strip()
     if base_url:
         base_url = base_url.rstrip("/")
     elif _settings and _settings.mealie_base_url:
@@ -87,7 +100,7 @@ def _resolve_request() -> tuple[str, str]:
     else:
         raise ToolError(
             f"No Mealie base URL configured. Set the MEALIE_BASE_URL environment "
-            f"variable, or send the target instance URL in the '{MEALIE_URL_HEADER}' header."
+            f"variable, or send the target instance URL in the '{url_header}' header."
         )
 
     return base_url, token
@@ -145,7 +158,7 @@ async def mealie_request(
     if response.status_code == 401:
         raise ToolError(
             "Mealie rejected the API token (401 Unauthorized). Check the "
-            f"'{MEALIE_TOKEN_HEADER}' header value."
+            f"'{_token_header()}' header value."
         )
     if response.status_code == 403:
         raise ToolError("Mealie denied access to this resource (403 Forbidden).")

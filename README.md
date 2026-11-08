@@ -14,11 +14,15 @@ There are two independent credentials:
 | Credential | Header | Purpose |
 | --- | --- | --- |
 | **MCP endpoint token** | `Authorization: Bearer <token>` | A static secret (set via `MCP_AUTH_TOKEN`) that gates the server. Requests without a valid token are rejected with `401`. |
-| **Mealie API token** | `X-Mealie-Token: <token>` | Supplied **per request** by each client. The server forwards it to Mealie as a bearer token, so one server can serve many Mealie users. |
+| **Mealie API token** | `X-Mealie-Token: <token>`² | Supplied **per request** by each client. The server forwards it to Mealie as a bearer token, so one server can serve many Mealie users. |
 
 Optionally, a client can target a different Mealie instance per request with the
-`X-Mealie-Url: https://other-mealie.example.com` header (otherwise `MEALIE_BASE_URL`
+`X-Mealie-Url: https://other-mealie.example.com` header² (otherwise `MEALIE_BASE_URL`
 is used).
+
+² Default header names. Change them with `MEALIE_TOKEN_HEADER` /
+`MEALIE_URL_HEADER` if your client can only send particular headers (see
+[Claude](#claude-claudeai-custom-connector)).
 
 Get a Mealie API token from your Mealie profile: **Profile → Manage API Tokens**.
 
@@ -107,6 +111,27 @@ every LibreChat user acts as their own Mealie account.
 > (you'll see `401`s followed by `/.well-known/oauth-*` `404`s). See
 > [Troubleshooting](#troubleshooting-401-unauthorized).
 
+### Claude (claude.ai custom connector)
+
+claude.ai custom connectors send fixed credentials as **request headers**, but
+only header names that Anthropic has approved, such as `authorization`,
+`x-api-key` and `x-auth-token`, so `X-Mealie-Token` is not available. Tell the server to read
+the Mealie token from a supported header instead:
+
+```bash
+MEALIE_TOKEN_HEADER=x-api-key
+```
+
+Then add the connector with **No sign-in** and these request headers:
+
+| Header | Value |
+| --- | --- |
+| `Authorization` | `Bearer <your MCP_AUTH_TOKEN>` |
+| `x-api-key` | `<your Mealie API token>` |
+
+`Authorization` cannot be used for the Mealie token, because it already carries
+the endpoint gate. The server refuses to start if you try.
+
 ## Configuration
 
 | Variable | Required | Default | Description |
@@ -116,13 +141,15 @@ every LibreChat user acts as their own Mealie account.
 | `MEALIE_READONLY` | no | `true` | Set `false` to also register write tools. |
 | `MEALIE_TIMEOUT` | no | `30` | Outbound request timeout in seconds. |
 | `MEALIE_VERIFY_SSL` | no | `true` | Set `false` for self-signed Mealie certs. |
+| `MEALIE_TOKEN_HEADER` | no | `x-mealie-token` | Request header the per-request Mealie API token is read from (case-insensitive). Must not be `Authorization`. |
+| `MEALIE_URL_HEADER` | no | `x-mealie-url` | Request header the optional per-request Mealie base URL override is read from. Must differ from `MEALIE_TOKEN_HEADER`. |
 | `MCP_HOST` | no | `0.0.0.0` | Bind address. |
 | `MCP_PORT` | no | `8000` | Bind port. |
 | `MCP_PATH` | no | `/mcp` | Endpoint path. |
 | `MCP_LOG_LEVEL` | no | `info` | uvicorn log level. |
 | `MCP_AUTH_DEBUG` | no | `false` | Log a masked diagnostic for each request hitting the auth gate (to troubleshoot `401`s). See [Troubleshooting](#troubleshooting-401-unauthorized). |
 
-¹ Required unless every client sends the `X-Mealie-Url` header.
+¹ Required unless every client sends the Mealie URL header (`X-Mealie-Url` by default).
 
 ## Troubleshooting `401 Unauthorized`
 

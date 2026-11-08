@@ -61,13 +61,16 @@ async def http_client(
     gate_token: str = GATE_TOKEN,
     mealie_token: str | None = MEALIE_TOKEN,
     mealie_url: str | None = None,
+    token_header: str = "X-Mealie-Token",
+    settings: Settings | None = None,
 ) -> AsyncIterator[Client]:
     """Yield a FastMCP client connected to the real app over ASGITransport.
 
     Must be used inside a ``respx`` block that passes the ``mcp.test`` host
     through (otherwise the in-process MCP traffic would be intercepted too).
     """
-    settings = Settings(auth_tokens=[GATE_TOKEN], mealie_base_url=MEALIE_BASE)
+    if settings is None:
+        settings = Settings(auth_tokens=[GATE_TOKEN], mealie_base_url=MEALIE_BASE)
     app = build_server(settings).http_app()
 
     # NOTE: `app.router.lifespan_context` and `StreamableHttpTransport`'s
@@ -85,7 +88,7 @@ async def http_client(
 
     client_headers = {"Authorization": f"Bearer {gate_token}"}
     if mealie_token is not None:
-        client_headers["X-Mealie-Token"] = mealie_token
+        client_headers[token_header] = mealie_token
     if mealie_url is not None:
         client_headers["X-Mealie-Url"] = mealie_url
 
@@ -148,3 +151,26 @@ async def test_whitespace_mealie_token_treated_as_missing():
                 await client.call_tool("get_app_info", {})
     assert "Missing Mealie credential" in _all_messages(excinfo.value)
     assert not mealie.called
+
+
+async def test_custom_token_header_forwarded_end_to_end():
+    """With MEALIE_TOKEN_HEADER=x-api-key (e.g. a claude.ai connector), the token
+    sent in that header passes the real HTTP stack and reaches Mealie, and the
+    server instructions advertise the configured name."""
+    settings = Settings(
+        auth_tokens=[GATE_TOKEN],
+        mealie_base_url=MEALIE_BASE,
+        mealie_token_header="X-Api-Key",
+    )
+    with respx.mock(assert_all_called=False) as router:
+        router.route(host=MCP_HOST).pass_through()
+        mealie = router.get(f"{MEALIE_BASE}/api/app/about").mock(
+            return_value=httpx.Response(200, json={"version": "9.9.9"})
+        )
+        async with http_client(token_header="X-Api-Key", settings=settings) as client:
+            result = await client.call_tool("get_app_info", {})
+            instructions = client.initialize_result.instructions
+
+    assert result.data == {"version": "9.9.9"}
+    assert mealie.calls.last.request.headers["authorization"] == f"Bearer {MEALIE_TOKEN}"
+    assert "'x-api-key: <your Mealie API token>'" in instructions

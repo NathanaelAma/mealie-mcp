@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `MEALIE_TOKEN_HEADER` and `MEALIE_URL_HEADER` environment variables to rename
+  the headers carrying the per-request Mealie token (default `X-Mealie-Token`)
+  and base-URL override (default `X-Mealie-Url`). This lets clients that only
+  send approved header names, such as claude.ai custom connectors
+  (`x-api-key`, `x-auth-token`), supply the Mealie token. Names are validated at
+  startup. `Authorization` is rejected because it carries the endpoint gate, and
+  the two headers must differ. Server instructions and error messages show the
+  configured name.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added
