@@ -25,7 +25,7 @@ from .config import MEALIE_TOKEN_HEADER, Settings
 
 logger = logging.getLogger("mealie_mcp.auth")
 
-def _instructions(read_only: bool) -> str:
+def _instructions(read_only: bool, token_header: str = MEALIE_TOKEN_HEADER) -> str:
     """Server instructions, worded to match the actual read/write mode."""
     access = "Read-only access" if read_only else "Read and write access"
     writes = (
@@ -42,7 +42,7 @@ def _instructions(read_only: bool) -> str:
 
 Authentication: every request must include two things —
   1. 'Authorization: Bearer <MCP token>' to reach this server, and
-  2. '{MEALIE_TOKEN_HEADER}: <your Mealie API token>' so the server can act as you in Mealie.
+  2. '{token_header}: <your Mealie API token>' so the server can act as you in Mealie.
 
 Use search_recipes to find recipes and get_recipe for full detail. Reference
 data (categories, tags, tools, foods, units, labels) and household data
@@ -77,7 +77,7 @@ def build_server(settings: Settings) -> FastMCP:
 
     mcp = FastMCP(
         name="mealie-mcp",
-        instructions=_instructions(settings.read_only),
+        instructions=_instructions(settings.read_only, settings.mealie_token_header),
         version="0.3.0",
         auth=verifier,
         lifespan=lifespan,

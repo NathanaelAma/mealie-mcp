@@ -15,6 +15,12 @@ services:
       # 'X-Mealie-Url' header; if so, this can be omitted.
       MEALIE_BASE_URL: ${MEALIE_BASE_URL:-}
 
+      # Header names the per-request Mealie token / URL override are read from.
+      # Change these for clients that only send fixed header names (e.g. set
+      # MEALIE_TOKEN_HEADER=x-api-key for claude.ai custom connectors).
+      MEALIE_TOKEN_HEADER: ${MEALIE_TOKEN_HEADER:-x-mealie-token}
+      MEALIE_URL_HEADER: ${MEALIE_URL_HEADER:-x-mealie-url}
+
       # Optional tuning.
       MEALIE_READONLY: ${MEALIE_READONLY:-true}
       MEALIE_TIMEOUT: ${MEALIE_TIMEOUT:-30}

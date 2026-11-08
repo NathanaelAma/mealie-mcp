@@ -8,6 +8,7 @@ static bearer token used to gate the MCP HTTP endpoint.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 
@@ -25,12 +26,45 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# Header carrying the per-request Mealie API token. Each MCP client supplies its
-# own Mealie token here so a single server can serve multiple Mealie users.
+# Default header carrying the per-request Mealie API token. Each MCP client
+# supplies its own Mealie token here so a single server can serve multiple
+# Mealie users. Override with MEALIE_TOKEN_HEADER for clients that can only send
+# a fixed set of header names (e.g. claude.ai custom connectors, which offer
+# names such as ``x-api-key`` or ``x-auth-token``).
 MEALIE_TOKEN_HEADER = "x-mealie-token"
 
-# Optional per-request override for the Mealie base URL (multi-instance setups).
+# Default header for the optional per-request Mealie base URL override
+# (multi-instance setups). Override with MEALIE_URL_HEADER.
 MEALIE_URL_HEADER = "x-mealie-url"
+
+# Header the MCP endpoint's static bearer gate reads. The Mealie headers must
+# not reuse it, or the gate token would be forwarded to Mealie (and vice versa).
+_GATE_HEADER = "authorization"
+
+# RFC 9110 field-name ("token") characters.
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
+
+def _normalize_header_name(name: str, env_var: str) -> str:
+    """Validate an HTTP header name and return it lower-cased.
+
+    Header lookups are case-insensitive, and Starlette exposes them lower-cased,
+    so storing the canonical lower-case form keeps comparisons simple.
+    """
+    cleaned = name.strip()
+    if not cleaned or not _HEADER_NAME_RE.match(cleaned):
+        raise RuntimeError(
+            f"{env_var}={name!r} is not a valid HTTP header name. Use letters, "
+            "digits and '-' (e.g. 'x-api-key')."
+        )
+    lowered = cleaned.lower()
+    if lowered == _GATE_HEADER:
+        raise RuntimeError(
+            f"{env_var} cannot be 'Authorization': that header carries the "
+            "MCP_AUTH_TOKEN gate for this server. Pick another name, such as "
+            "'x-api-key' or 'x-auth-token'."
+        )
+    return lowered
 
 
 @dataclass(frozen=True)
@@ -41,7 +75,8 @@ class Settings:
     auth_tokens: list[str] = field(default_factory=list)
 
     # Default Mealie base URL (e.g. https://mealie.example.com). May be overridden
-    # per request via the X-Mealie-Url header. Required if the header is not sent.
+    # per request via the Mealie URL header (default X-Mealie-Url). Required if
+    # the header is not sent.
     mealie_base_url: str | None = None
 
     # HTTP server bind settings (inside the container).
@@ -66,6 +101,25 @@ class Settings:
     # non-reversible fingerprint vs. the configured tokens). Off by default; turn
     # on with MCP_AUTH_DEBUG=true to troubleshoot 401s without leaking secrets.
     auth_debug: bool = False
+
+    # Request header names carrying the per-request Mealie token and the
+    # optional base-URL override. Stored lower-cased; validated on construction.
+    mealie_token_header: str = MEALIE_TOKEN_HEADER
+    mealie_url_header: str = MEALIE_URL_HEADER
+
+    def __post_init__(self) -> None:
+        token_header = _normalize_header_name(
+            self.mealie_token_header, "MEALIE_TOKEN_HEADER"
+        )
+        url_header = _normalize_header_name(self.mealie_url_header, "MEALIE_URL_HEADER")
+        if token_header == url_header:
+            raise RuntimeError(
+                f"MEALIE_TOKEN_HEADER and MEALIE_URL_HEADER must differ (both are "
+                f"'{token_header}')."
+            )
+        # Frozen dataclass: assign the normalised values via object.__setattr__.
+        object.__setattr__(self, "mealie_token_header", token_header)
+        object.__setattr__(self, "mealie_url_header", url_header)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -92,4 +146,6 @@ class Settings:
             read_only=_env_bool("MEALIE_READONLY", True),
             log_level=os.getenv("MCP_LOG_LEVEL", "info"),
             auth_debug=_env_bool("MCP_AUTH_DEBUG", False),
+            mealie_token_header=os.getenv("MEALIE_TOKEN_HEADER") or MEALIE_TOKEN_HEADER,
+            mealie_url_header=os.getenv("MEALIE_URL_HEADER") or MEALIE_URL_HEADER,
         )
